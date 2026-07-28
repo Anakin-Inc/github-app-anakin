@@ -1,0 +1,26 @@
+{
+  "name": "github-app-anakin",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GitHub App: on a failed Actions workflow run, uses Anakin's agentic-search to research the failure and files a GitHub issue with findings; also exposes a /anakin-search slash command in issue comments via Anakin's synchronous search endpoint.",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test \"test/**/*.test.js\"",
+    "smoke": "node scripts/smoke-test.js"
+  },
+  "dependencies": {
+    "@octokit/auth-app": "^7.1.0",
+    "@octokit/rest": "^21.0.0",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Anakin-Inc/github-app-anakin"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,69 @@
+# GitHub App manifest.
+#
+# Used with GitHub's "Create a GitHub App from a manifest" flow:
+# https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest
+#
+# That flow, confirmed live from GitHub's docs (not assumed):
+#   1. JSON-encode this manifest and POST it as the `manifest` form field to
+#      https://github.com/settings/apps/new (personal account) or
+#      https://github.com/organizations/<org>/settings/apps/new (org account).
+#   2. The user reviews and confirms app creation on GitHub's UI.
+#   3. GitHub redirects the browser to `redirect_url` below with a one-time
+#      `code` query parameter (valid for a short window).
+#   4. The app exchanges that code — once, within one hour — via
+#      `POST https://api.github.com/app-manifests/{code}/conversions`
+#      (no auth header needed for this one call) to receive the permanent
+#      App ID, PEM private key, and webhook secret. That response is what
+#      populates GITHUB_APP_ID / GITHUB_PRIVATE_KEY / GITHUB_WEBHOOK_SECRET
+#      in .env — see scripts/register.md for the one-time setup script this
+#      repo does NOT ship (never run — needs a real GitHub account + a
+#      publicly reachable redirect_url, see SUBMIT.md).
+#
+# Replace <your-deployed-host> below with the real hostname this server is
+# deployed to before running the manifest flow — GitHub requires the webhook
+# and redirect URLs to be reachable from GitHub's servers, so localhost only
+# works via a tunnel (ngrok/smee.io) during development.
+
+name: Anakin CI Research
+url: https://anakin.io
+description: >
+  On a failed GitHub Actions workflow run, Anakin researches the failure —
+  an agentic web search over recent issues, release notes, and docs for the
+  error signature — and files a GitHub issue with its findings. Also
+  supports a manual `/anakin-search <query>` slash command in issue
+  comments as a lighter, synchronous lookup.
+
+public: true
+
+hook_attributes:
+  url: https://<your-deployed-host>/webhook
+
+redirect_url: https://<your-deployed-host>/setup/callback
+callback_urls:
+  - https://<your-deployed-host>/setup/callback
+setup_url: https://<your-deployed-host>/setup
+setup_on_update: true
+
+# Permissions, per GitHub's App permissions reference
+# (https://docs.github.com/en/rest/authentication/permissions-required-for-github-apps):
+#   - actions:read   required to receive `workflow_run` events and to call
+#                     `GET /repos/{owner}/{repo}/actions/runs/{run_id}/jobs`
+#                     (docs.github.com's webhook-events page states a
+#                     workflow_run subscription needs "at least read-level
+#                     access for the Actions repository permission").
+#   - issues:write   required to file issues and post comments
+#                     (POST .../issues, POST .../issues/{n}/comments), and
+#                     to receive `issue_comment` events for the slash command.
+#   - metadata:read  GitHub marks this "read" as effectively mandatory
+#                     baseline for every GitHub App; declared explicitly
+#                     here for clarity even though it's implied.
+default_permissions:
+  actions: read
+  issues: write
+  metadata: read
+
+# Only the two events this server actually handles (see server.js's
+# `handleEvent`) — deliberately not subscribing to anything unused.
+default_events:
+  - workflow_run
+  - issue_comment
