@@ -48,6 +48,45 @@ const ISSUE_COMMENT_PAYLOAD = {
   sender: { login: "octocat" },
 };
 
+// One issue_comment payload per new slash command added on top of
+// /anakin-search, same shape as ISSUE_COMMENT_PAYLOAD above — only
+// `comment.body` differs. Exercises the same signature-verification path
+// for each new command's regex/dispatch route (server.js's SLASH_COMMANDS
+// table), not just the original /anakin-search.
+function issueCommentPayloadWithBody(body) {
+  return {
+    action: "created",
+    issue: { number: 42, title: "CI is flaky on main" },
+    comment: { id: 1, body },
+    repository: {
+      name: "example-repo",
+      full_name: "octocat/example-repo",
+      owner: { login: "octocat" },
+    },
+    installation: { id: 123456 },
+    sender: { login: "octocat" },
+  };
+}
+
+const NEW_COMMAND_PAYLOADS = [
+  ["/anakin-wire <query>", issueCommentPayloadWithBody("/anakin-wire top phones on walmart")],
+  ["/anakin-wire-catalog [slug]", issueCommentPayloadWithBody("/anakin-wire-catalog amazon")],
+  [
+    "/anakin-wire-run <action_id> [json]",
+    issueCommentPayloadWithBody('/anakin-wire-run amazon.search_products {"query":"mouse"}'),
+  ],
+  ["/anakin-ai-visibility-sources", issueCommentPayloadWithBody("/anakin-ai-visibility-sources")],
+  [
+    "/anakin-ai-visibility <query>",
+    issueCommentPayloadWithBody("/anakin-ai-visibility what is your return policy?"),
+  ],
+  ["/anakin-monitors [id]", issueCommentPayloadWithBody("/anakin-monitors")],
+  ["/anakin-monitor-changes <id>", issueCommentPayloadWithBody("/anakin-monitor-changes mon_123")],
+  ["/anakin-sessions [domain]", issueCommentPayloadWithBody("/anakin-sessions amazon.com")],
+  ["/anakin-map <url>", issueCommentPayloadWithBody("/anakin-map https://example.com")],
+  ["/anakin-crawl <url>", issueCommentPayloadWithBody("/anakin-crawl https://example.com")],
+];
+
 // Shaped like a real `workflow_run` "completed"/failure delivery
 // (https://docs.github.com/en/webhooks/webhook-events-and-payloads#workflow_run).
 const WORKFLOW_RUN_PAYLOAD = {
@@ -165,6 +204,18 @@ async function main() {
       secretForSignature: WEBHOOK_SECRET,
     });
     results.push(["valid signature / workflow_run failure", validRun.status === 202, validRun]);
+
+    // 2b. Every new slash command added in this pass -> each should ack 202,
+    // exercising server.js's SLASH_COMMANDS dispatch table end-to-end for
+    // real, signed HTTP requests (not just the original /anakin-search).
+    for (const [label, payload] of NEW_COMMAND_PAYLOADS) {
+      const res = await postWebhook({
+        event: "issue_comment",
+        payload,
+        secretForSignature: WEBHOOK_SECRET,
+      });
+      results.push([`valid signature / issue_comment ${label}`, res.status === 202, res]);
+    }
 
     // 3. Signature computed with the WRONG secret -> must be rejected (401).
     const wrongSecret = await postWebhook({

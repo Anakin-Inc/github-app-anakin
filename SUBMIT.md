@@ -11,14 +11,29 @@ acceptance of GitHub's Marketplace Developer Agreement.
 
 ```
 app.yml               GitHub App manifest (registration source of truth)
-server.js              Express webhook server + event routing
+server.js              Express webhook server + event routing + 11 slash-command handlers
 lib/verify-signature.js   HMAC-SHA256 / X-Hub-Signature-256 verification
 lib/github-auth.js         JWT (RS256) -> installation access token, via @octokit/auth-app
-lib/anakin-client.js        Anakin API client (search, agentic-search)
+lib/anakin-client.js        Anakin API client (search, agentic-search, wire discover/
+                             catalog/run, ai-visibility search/sources, monitor list/
+                             changes, sessions, map, crawl)
 test/*.test.js          node:test unit tests
 scripts/smoke-test.js    Starts the real server, sends real signed HTTP requests
 package.json, .env.example, .gitignore
 ```
+
+This app now covers 12 of Anakin's 21 API capabilities (up from 3): the
+original `search` + `agentic_search` (via `/anakin-search` and the
+`workflow_run` handler), plus `wire_discover`, `wire_catalog`,
+`wire_read_action`, `ai_visibility_search`, `ai_visibility_sources`,
+`monitor_list`, `monitor_changes`, `session_list`, `map`, and `crawl` — each
+its own `/anakin-*` slash command in `server.js`. The remaining 9
+(`wire_write_action`, `wire_login`, `wire_build`, `wire_identities`,
+`monitor_create`, `monitor_control`, `session_delete`, `browser_task`,
+`scrape`) are deliberately not exposed; see README's "Known limitations"
+for why each was left out (mostly: state-changing side effects with no
+access control on who can comment "/anakin-...", which this pass doesn't
+add).
 
 ## Real GitHub App / webhook structure — confirmed live, not guessed
 
@@ -88,33 +103,57 @@ GitHub App auth details are exactly the kind of thing worth re-verifying:
 
 **Built and verified in this sandbox:**
 - `npm install` — succeeds, 96 packages, real `@octokit/auth-app`,
-  `@octokit/rest`, `express`, `dotenv` from the npm registry.
+  `@octokit/rest`, `express`, `dotenv` from the npm registry. No new
+  dependencies were needed for the 9 additional Anakin endpoints — they
+  reuse the same `fetch`-based request/poll pattern already in
+  `lib/anakin-client.js`.
 - `node --check` passes on every `.js` file (`server.js`, all of `lib/`,
   all of `test/`, `scripts/smoke-test.js`).
-- `npm test` — 14 unit tests, all passing (`node:test`): signature
-  verification (accept, wrong secret, tampered body, missing header, missing
-  configured secret, non-Buffer input, missing `sha256=` prefix) and event
-  routing (`workflow_run` non-failure/non-completed cases ignored,
-  `issue_comment` without the slash command ignored, unrelated event types
-  ignored, slash-command regex parsing incl. multiline/case-insensitivity).
+- `npm test` — 29 unit tests, all passing (`node:test`), up from the
+  original 14: the original signature-verification (7) and event-routing (7)
+  tests are unchanged and still pass, plus 15 new tests covering the 10
+  new slash-command regexes (argument capture, optional-argument handling,
+  case-insensitivity, and — important given several new commands share a
+  prefix like `/anakin-wire` vs `/anakin-wire-catalog` vs
+  `/anakin-wire-run` — that none of them cross-match each other) and 4
+  routing tests confirming `handleEvent` dispatches each new command through
+  to its handler and resolves safely (no throw / no unhandled rejection)
+  when there's no `installation.id` to authenticate with.
 - **The webhook signature-verification code path was actually exercised
   end-to-end, not bypassed**: `npm run smoke` starts the real `server.js` as
   a child process and fires real HTTP `POST /webhook` requests at it with a
   genuinely HMAC-SHA256-computed `X-Hub-Signature-256` header over
   real-documented-shape `issue_comment` and `workflow_run` JSON payloads
   (fields matching what's cited above from GitHub's webhook payload docs).
-  Results, all passing:
+  The script was extended in this pass to send one additional
+  `issue_comment` payload per new slash command, exercising the same
+  signature-verification path for all 12 commands, not just the original
+  `/anakin-search`. Results, all passing:
   ```
-  PASS  valid signature / issue_comment slash command   (status=202)
-  PASS  valid signature / workflow_run failure            (status=202)
-  PASS  wrong-secret signature is rejected                 (status=401)
-  PASS  missing signature header is rejected                (status=401)
-  PASS  tampered body invalidates prior signature             (status=401)
+  PASS  valid signature / issue_comment slash command             (status=202)
+  PASS  valid signature / workflow_run failure                    (status=202)
+  PASS  valid signature / issue_comment /anakin-wire <query>       (status=202)
+  PASS  valid signature / issue_comment /anakin-wire-catalog [slug] (status=202)
+  PASS  valid signature / issue_comment /anakin-wire-run <action_id> [json] (status=202)
+  PASS  valid signature / issue_comment /anakin-ai-visibility-sources (status=202)
+  PASS  valid signature / issue_comment /anakin-ai-visibility <query> (status=202)
+  PASS  valid signature / issue_comment /anakin-monitors [id]      (status=202)
+  PASS  valid signature / issue_comment /anakin-monitor-changes <id> (status=202)
+  PASS  valid signature / issue_comment /anakin-sessions [domain]  (status=202)
+  PASS  valid signature / issue_comment /anakin-map <url>          (status=202)
+  PASS  valid signature / issue_comment /anakin-crawl <url>        (status=202)
+  PASS  wrong-secret signature is rejected                         (status=401)
+  PASS  missing signature header is rejected                      (status=401)
+  PASS  tampered body invalidates prior signature                 (status=401)
   ```
   The tampered-body case reuses the signature from a *different*,
   previously-valid payload against a modified body — confirming the
   comparison is against the actual bytes received, not just "a signature
-  header is present."
+  header is present." As before, every one of the 12 issue_comment
+  deliveries acks 202 and then fails identically at the JWT-signing step
+  against the smoke test's intentionally-fake PEM (see below) — confirming
+  each new command's handler runs real code through real authentication,
+  not a stub.
 - After the 202 ack, the async handler chain (JWT-sign attempt ->
   `@octokit/auth-app`) does run for real against the smoke test's
   intentionally-fake PEM, and fails exactly where expected —
@@ -141,10 +180,14 @@ GitHub App auth details are exactly the kind of thing worth re-verifying:
   for routing logic, and smoke-tested up to (and including) their real
   failure at the JWT-signing step with a fake key.
 - **No real Anakin API key was used** — `anakin-client.js`'s request/response
-  shapes are transcribed from `anakin-py`'s `client.py`/`models.py`, the same
-  "read the real SDK source, not guessed" standard as this session's other
-  submissions, but never confirmed against a live `200` from
-  `api.anakin.io`.
+  shapes are transcribed from real source, never confirmed against a live
+  `200` from `api.anakin.io`: the original `search`/`agenticSearch` from
+  `anakin-py`'s `client.py`/`models.py`, and the 9 endpoints added in this
+  pass (`wireDiscover`, `wireCatalog`, `wireRun`, `aiVisibilitySources`,
+  `aiVisibilitySearch`, `monitorList`/`monitorGet`, `monitorChanges`,
+  `sessionsList`, `map`, `crawl`) from `anakin-mcp`'s own TypeScript SDK,
+  `anakin-mcp/src/client.ts` + `anakin-mcp/src/tools/*.ts` — the same "read
+  the real SDK source, not guessed" standard either way.
 - **No GitHub Marketplace listing was drafted or submitted.** That needs:
   the app owned by an org, a public GitHub repo the App's homepage can point
   to, a logo/feature card/screenshots, a privacy policy + ToS page, a
@@ -171,7 +214,9 @@ GitHub App auth details are exactly the kind of thing worth re-verifying:
    deployed server's env.
 4. Install the App on a test repo, push a failing workflow run, confirm a
    real issue gets filed and a real Anakin-research comment follows; test
-   `/anakin-search <query>` on an issue.
+   each of the 12 `/anakin-*` commands (see README's command table) on an
+   issue, starting with a read-only one like `/anakin-search` or
+   `/anakin-map` before trying `/anakin-wire-run` against a real action_id.
 5. For Marketplace: enroll as a GitHub Marketplace developer, accept the
    Developer Agreement, draft the listing (logo, screenshots, privacy
    policy, ToS, support contact, at least one pricing plan), add

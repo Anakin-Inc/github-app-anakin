@@ -2,7 +2,7 @@
   "name": "github-app-anakin",
   "version": "1.0.0",
   "private": true,
-  "description": "GitHub App: on a failed Actions workflow run, uses Anakin's agentic-search to research the failure and files a GitHub issue with findings; also exposes a /anakin-search slash command in issue comments via Anakin's synchronous search endpoint.",
+  "description": "GitHub App: on a failed Actions workflow run, uses Anakin's agentic-search to research the failure and files a GitHub issue with findings; also exposes /anakin-search, /anakin-wire[-catalog|-run], /anakin-ai-visibility[-sources], /anakin-monitors, /anakin-monitor-changes, /anakin-sessions, /anakin-map, and /anakin-crawl slash commands in issue comments.",
   "main": "server.js",
   "engines": {
     "node": ">=18"
