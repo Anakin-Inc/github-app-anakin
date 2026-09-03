@@ -16,7 +16,7 @@
     "@octokit/auth-app": "^7.1.0",
     "@octokit/rest": "^21.0.0",
     "dotenv": "^16.4.5",
-    "express": "^4.19.2"
+    "express": "^5.2.1"
   },
   "repository": {
     "type": "git",
